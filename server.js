@@ -9,8 +9,8 @@ const app = express();
 app.set('trust proxy', 1);
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://vijaydhiman200m_db_user:vijaydhiman200m_db_user@cluster0.59s7lx2.mongodb.net/telegram_verification?retryWrites=true&w=majority&appName=Cluster0';
-const BASE_URL = 'https://link-verfcation.vercel.app';
-const LV_POST_URL = 'https://link-center.net/6239480/DT2FXUCjA7op';
+const BASE_URL = 'https://nexo-link-vertise.vercel.app/';
+const LV_POST_URL = 'https://link-target.net/6461539/GdKtiAqynkDv';
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
