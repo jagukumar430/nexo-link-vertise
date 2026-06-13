@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
+const axios = require('axios');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -14,6 +16,7 @@ const LV_POST_URL = 'https://link-target.net/6461539/GdKtiAqynkDv';
 
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
+app.use(cookieParser());
 app.use(express.json({ limit: '10kb' }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
@@ -28,6 +31,9 @@ const tokenSchema = new mongoose.Schema({
   token: { type: String, required: true, unique: true },
   user_id: { type: Number, required: true },
   bot_username: { type: String, required: true },
+
+  completed: { type: Boolean, default: false }, // NEW
+
   used: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
@@ -66,11 +72,33 @@ app.get('/check/:token', async (req, res) => {
     if (!token || token.length !== 64) return res.json({ valid: false });
     await connectDB();
     const doc = await Token.findOne({ token });
-    if (doc && !doc.used) {
-      doc.used = true;
-      await doc.save();
-      return res.json({ valid: true, user_id: doc.user_id });
+
+    console.log("CHECK STATUS:", {
+    found: !!doc,
+    used: doc?.used,
+    completed: doc?.completed
+    });
+
+    if (doc && !doc.used && doc.completed) {
+    console.log("CHECK SUCCESS:", {
+        token: token,
+        user_id: doc.user_id
+    });
+
+    doc.used = true;
+    await doc.save();
+
+    return res.json({
+        valid: true,
+        user_id: doc.user_id
+    });
     }
+
+    console.log("CHECK FAILED:", {
+    token: token,
+    found: !!doc,
+    used: doc ? doc.used : null
+    });
     res.json({ valid: false });
   } catch(e) { res.json({ valid: false }); }
 });
@@ -84,6 +112,12 @@ app.get('/go/:token', async (req, res) => {
     const doc = await Token.findOne({ token });
     if (!doc) return res.send(page('Expired', '<div class="icon red">!</div><h1>Link Expired</h1><p>Get a new verification link.</p>'));
     if (doc.used) return res.send(page('Used', '<div class="icon red">!</div><h1>Already Used</h1><p>This link has already been used.</p>'));
+    res.cookie('verify_token', token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 12 * 60 * 60 * 1000
+    }); 
     
     res.send(page('Verify - @'+doc.bot_username,
       `<div class="icon purple pulse">✓</div><h1>Complete Verification</h1><p>Watch a short ad to verify for <b>@${doc.bot_username}</b></p><p style="color:#e53e3e;font-size:13px">⚠️ Complete the ad steps to continue</p><p class="small">⏱️ Link expires in 12 hours</p><a href="${LV_POST_URL}" class="btn">VERIFY NOW</a>`
@@ -94,20 +128,42 @@ app.get('/go/:token', async (req, res) => {
 // ✅ DONE PAGE - Ads complete, token dikhao, used MAT karo
 app.get('/done', async (req, res) => {
   try {
+    console.log("HASH:", req.query.hash);
+    console.log("COOKIE TOKEN:", req.cookies.verify_token);
+
     await connectDB();
-    const urlToken = req.query.token || '';
+
+    const token = req.cookies.verify_token;
     let doc = null;
-    
-    if (urlToken && urlToken.length === 64) {
-      doc = await Token.findOne({ token: urlToken, used: false });
+
+    if (token && token.length === 64) {
+    doc = await Token.findOne({
+        token,
+        used: false
+    });
     }
+    
     if (!doc) {
-      doc = await Token.findOne({ used: false }).sort({ createdAt: -1 });
+    return res.send(page(
+        'Error',
+        '<div class="icon red">!</div><h1>Verification Failed</h1><p>Please generate a new verification link.</p>'
+    ));
     }
-    
-    if (!doc) return res.send(page('Error', '<div class="icon red">!</div><h1>No Active Token</h1><p>Please get a new verification link from the bot.</p>'));
-    if (doc.used) return res.send(page('Used', '<div class="icon red">!</div><h1>Already Used</h1><p>This link has already been used.</p>'));
-    
+
+    doc.completed = true;
+    await doc.save();
+
+    console.log("VERIFICATION COMPLETED:", {
+    token: doc.token,
+    hash: req.query.hash
+    });
+
+    if (doc.used)
+    return res.send(page(
+        'Used',
+        '<div class="icon red">!</div><h1>Already Used</h1><p>This link has already been used.</p>'
+    ));
+        
     // ❌ USED MAT KARO - Bot /check karega tab used hoga
     
     res.send(page('Success!',
